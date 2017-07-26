@@ -9,7 +9,7 @@
   
   File extensions with more than 3 charecters are not supported by the SD Library
   File Names longer than 8 charecters will be truncated by the SD library, so keep filenames shorter
-  index.htm is the default index (works on subfolders as well)
+  index.html is the default index (works on subfolders as well)
 
 
 */
@@ -47,7 +47,7 @@ void returnFail(String msg) {
 
 bool loadFromSdCard(String path){
   String dataType = "text/plain";
-  if(path.endsWith("/")) path += "index.htm";
+  if(path.endsWith("/")) path += "index.html";
 
   if(path.endsWith(".src")) path = path.substring(0, path.lastIndexOf("."));
   else if(path.endsWith(".htm")) dataType = "text/html";
@@ -60,32 +60,10 @@ bool loadFromSdCard(String path){
   else if(path.endsWith(".xml")) dataType = "text/xml";
   else if(path.endsWith(".pdf")) dataType = "application/pdf";
   else if(path.endsWith(".zip")) dataType = "application/zip";
-
-/* 
- Modify the directory listing so that it returns JSON just like the Raspberry Pi version. 
-
- Sample:
-
- [
-{ "name":"Audio", "type":"directory", "mtime":"Tue, 27 Jun 2017 16:38:16 GMT" },
-{ "name":"Maps", "type":"directory", "mtime":"Tue, 27 Jun 2017 16:40:27 GMT" },
-{ "name":"Medicine", "type":"directory", "mtime":"Tue, 27 Jun 2017 16:50:59 GMT" },
-{ "name":"Text", "type":"directory", "mtime":"Tue, 27 Jun 2017 16:38:23 GMT" },
-{ "name":"Video", "type":"directory", "mtime":"Tue, 27 Jun 2017 16:39:20 GMT" },
-{ "name":"King James Bible.epub", "type":"file", "mtime":"Tue, 27 Jun 2017 16:17:45 GMT", "size":1457717 },
-{ "name":"_icon_Audio.png", "type":"file", "mtime":"Mon, 08 Feb 2016 13:36:30 GMT", "size":39156 },
-{ "name":"_icon_Help_fa-question-circle-o", "type":"file", "mtime":"Wed, 12 Apr 2017 21:03:28 GMT", "size":0 },
-{ "name":"_icon_Maps.png", "type":"file", "mtime":"Sat, 18 Feb 2017 00:36:48 GMT", "size":41810 },
-{ "name":"_icon_Medicine.png", "type":"file", "mtime":"Sat, 18 Feb 2017 00:30:10 GMT", "size":36004 },
-{ "name":"_icon_Test_fa-book", "type":"file", "mtime":"Mon, 10 Apr 2017 19:17:32 GMT", "size":0 },
-{ "name":"_icon_Text.png", "type":"file", "mtime":"Wed, 30 Dec 2015 21:08:42 GMT", "size":32716 },
-{ "name":"_icon_Video.png", "type":"file", "mtime":"Wed, 30 Dec 2015 21:08:42 GMT", "size":62735 }
-]
- */
- 
+  
   File dataFile = SD.open(path.c_str());
   if(dataFile.isDirectory()){
-    path += "/index.htm";
+    path += "/index.html";
     dataType = "text/html";
     dataFile = SD.open(path.c_str());
   }
@@ -197,17 +175,27 @@ void printDirectory() {
     File entry = dir.openNextFile();
     if (!entry)
     break;
-
+    
     String output;
     if (cnt > 0)
       output = ',';
 
-    output += "{\"type\":\"";
-    output += (entry.isDirectory()) ? "dir" : "file";
-    output += "\",\"name\":\"";
+    output += "{\"name\":\"";
     output += entry.name();
+  
+    output += "\",\"type\":\"";
+    output += (entry.isDirectory()) ? "directory" : "file";
+    
+    output += "\",\"mtime\":\"";
+  
+    if (!entry.isDirectory()) {
+      output += "\",\"size\":\"";
+      output += entry.size();
+    }
+    
     output += "\"";
     output += "}";
+    
     server.sendContent(output);
     entry.close();
  }
@@ -217,7 +205,7 @@ void printDirectory() {
 
 void handleNotFound(){
   if(hasSD && loadFromSdCard(server.uri())) return;
-  String message = "SDCARD Not Detected\n\n";
+  String message = "SDCARD Not Detected 1\n\n";
   message += "URI: ";
   message += server.uri();
   message += "\nMethod: ";
@@ -262,7 +250,6 @@ void setup(void){
      DBG_OUTPUT_PORT.println("SD Card initialized.");
      hasSD = true;
   }
-
 }
 
 void loop(void){
