@@ -11,7 +11,6 @@
   File Names longer than 8 charecters will be truncated by the SD library, so keep filenames shorter
   index.html is the default index (works on subfolders as well)
 
-
 */
 
 #include <ESP8266WiFi.h>
@@ -23,6 +22,7 @@
 #include <SD.h>
 
 #define DBG_OUTPUT_PORT Serial
+#define DEBUG_WEBSERVER
 
 const char* ssid = "ConnectBox-Mini";
 const char* host = "ConnectBox";
@@ -45,34 +45,34 @@ void returnFail(String msg) {
   server.send(500, "text/plain", msg + "\r\n");
 }
 
-bool loadFromSdCard(String path){
-  String dataType = "text/plain";
-  if(path.endsWith("/")) path += "index.html";
+bool loadIndex(){
+     loadFromSdCard("index.html");
+}
 
-  if(path.endsWith(".src")) path = path.substring(0, path.lastIndexOf("."));
-  else if(path.endsWith(".htm")) dataType = "text/html";
-  else if(path.endsWith(".css")) dataType = "text/css";
-  else if(path.endsWith(".js")) dataType = "application/javascript";
-  else if(path.endsWith(".png")) dataType = "image/png";
-  else if(path.endsWith(".gif")) dataType = "image/gif";
-  else if(path.endsWith(".jpg")) dataType = "image/jpeg";
-  else if(path.endsWith(".ico")) dataType = "image/x-icon";
-  else if(path.endsWith(".xml")) dataType = "text/xml";
-  else if(path.endsWith(".pdf")) dataType = "application/pdf";
-  else if(path.endsWith(".zip")) dataType = "application/zip";
+bool loadFromSdCard(String path){
+  DBG_OUTPUT_PORT.println("loadFromSdCard " + path);
+
+  if(!SD.exists(path)){
+    DBG_OUTPUT_PORT.println("Not found. Sending 404");
+    server.send(404, "text/plain", "File Not Found " + server.uri());
+  }
   
-  File dataFile = SD.open(path.c_str());
+  String dataType = "text/plain";
+  dataType = getContentType(path);
+
+  DBG_OUTPUT_PORT.println("Serving file " + path + " " + dataType);
+  File dataFile = SD.open(path);
   if(dataFile.isDirectory()){
-    path += "/index.html";
-    dataType = "text/html";
-    dataFile = SD.open(path.c_str());
+    DBG_OUTPUT_PORT.println("Path is a directory");
+    printDirectory(path);
   }
 
-  if (!dataFile)
+  if (!dataFile){
+    DBG_OUTPUT_PORT.println("not a data file");
     return false;
+  }
 
-  if (server.hasArg("download")) dataType = "application/octet-stream";
-
+  DBG_OUTPUT_PORT.println("About to send the file.");
   if (server.streamFile(dataFile, dataType) != dataFile.size()) {
     DBG_OUTPUT_PORT.println("Sent less data than expected!");
   }
@@ -81,90 +81,12 @@ bool loadFromSdCard(String path){
   return true;
 }
 
-void handleFileUpload(){
-  if(server.uri() != "/edit") return;
-  HTTPUpload& upload = server.upload();
-  if(upload.status == UPLOAD_FILE_START){
-    if(SD.exists((char *)upload.filename.c_str())) SD.remove((char *)upload.filename.c_str());
-    uploadFile = SD.open(upload.filename.c_str(), FILE_WRITE);
-    DBG_OUTPUT_PORT.print("Upload: START, filename: "); DBG_OUTPUT_PORT.println(upload.filename);
-  } else if(upload.status == UPLOAD_FILE_WRITE){
-    if(uploadFile) uploadFile.write(upload.buf, upload.currentSize);
-    DBG_OUTPUT_PORT.print("Upload: WRITE, Bytes: "); DBG_OUTPUT_PORT.println(upload.currentSize);
-  } else if(upload.status == UPLOAD_FILE_END){
-    if(uploadFile) uploadFile.close();
-    DBG_OUTPUT_PORT.print("Upload: END, Size: "); DBG_OUTPUT_PORT.println(upload.totalSize);
-  }
-}
-
-void deleteRecursive(String path){
-  File file = SD.open((char *)path.c_str());
-  if(!file.isDirectory()){
-    file.close();
-    SD.remove((char *)path.c_str());
-    return;
-  }
-
-  file.rewindDirectory();
-  while(true) {
-    File entry = file.openNextFile();
-    if (!entry) break;
-    String entryPath = path + "/" +entry.name();
-    if(entry.isDirectory()){
-      entry.close();
-      deleteRecursive(entryPath);
-    } else {
-      entry.close();
-      SD.remove((char *)entryPath.c_str());
-    }
-    yield();
-  }
-
-  SD.rmdir((char *)path.c_str());
-  file.close();
-}
-
-void handleDelete(){
-  if(server.args() == 0) return returnFail("BAD ARGS");
-  String path = server.arg(0);
-  if(path == "/" || !SD.exists((char *)path.c_str())) {
-    returnFail("BAD PATH");
-    return;
-  }
-  deleteRecursive(path);
-  returnOK();
-}
-
-void handleCreate(){
-  if(server.args() == 0) return returnFail("BAD ARGS");
-  String path = server.arg(0);
-  if(path == "/" || SD.exists((char *)path.c_str())) {
-    returnFail("BAD PATH");
-    return;
-  }
-
-  if(path.indexOf('.') > 0){
-    File file = SD.open((char *)path.c_str(), FILE_WRITE);
-    if(file){
-      file.write((const char *)0);
-      file.close();
-    }
-  } else {
-    SD.mkdir((char *)path.c_str());
-  }
-  returnOK();
-}
-
-void printDirectory() {
-  if(!server.hasArg("dir")) return returnFail("BAD ARGS");
-  String path = server.arg("dir");
-  if(path != "/" && !SD.exists((char *)path.c_str())) return returnFail("BAD PATH");
-  File dir = SD.open((char *)path.c_str());
-  path = String();
-  if(!dir.isDirectory()){
-    dir.close();
-    return returnFail("NOT DIR");
-  }
+void printDirectory(String path) {
+  DBG_OUTPUT_PORT.println("printDirectory " + path);
+  
+  if(!SD.exists(path)) return returnFail(path);
+  File dir = SD.open(path);
+ 
   dir.rewindDirectory();
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/json", "");
@@ -203,21 +125,37 @@ void printDirectory() {
  dir.close();
 }
 
-void handleNotFound(){
-  if(hasSD && loadFromSdCard(server.uri())) return;
-  String message = "SDCARD Not Detected 1\n\n";
-  message += "URI: ";
-  message += server.uri();
-  message += "\nMethod: ";
-  message += (server.method() == HTTP_GET)?"GET":"POST";
-  message += "\nArguments: ";
-  message += server.args();
-  message += "\n";
-  for (uint8_t i=0; i<server.args(); i++){
-    message += " NAME:"+server.argName(i) + "\n VALUE:" + server.arg(i) + "\n";
+String getContentType(String filename) {
+  if (server.hasArg("download")) return "application/octet-stream";
+  else if (filename.endsWith(".htm")) return "text/html";
+  else if (filename.endsWith(".html")) return "text/html";
+  else if (filename.endsWith(".css")) return "text/css";
+  else if (filename.endsWith(".js")) return "application/javascript";
+  else if (filename.endsWith(".json")) return "application/json";
+  else if (filename.endsWith(".png")) return "image/png";
+  else if (filename.endsWith(".gif")) return "image/gif";
+  else if (filename.endsWith(".jpg")) return "image/jpeg";
+  else if (filename.endsWith(".ico")) return "image/x-icon";
+  else if (filename.endsWith(".xml")) return "text/xml";
+  else if (filename.endsWith(".pdf")) return "application/x-pdf";
+  else if (filename.endsWith(".zip")) return "application/x-zip";
+  else if (filename.endsWith(".gz")) return "application/x-gzip";
+  return "text/plain";
+}
+
+String formatBytes(size_t bytes) {
+  if (bytes < 1024) {
+    return String(bytes) + "B";
   }
-  server.send(404, "text/plain", message);
-  DBG_OUTPUT_PORT.print(message);
+  else if (bytes < (1024 * 1024)) {
+    return String(bytes / 1024.0) + "KB";
+  }
+  else if (bytes < (1024 * 1024 * 1024)) {
+    return String(bytes / 1024.0 / 1024.0) + "MB";
+  }
+  else {
+    return String(bytes / 1024.0 / 1024.0 / 1024.0) + "GB";
+  }
 }
 
 void setup(void){
@@ -240,8 +178,10 @@ void setup(void){
     DBG_OUTPUT_PORT.print(host);
     DBG_OUTPUT_PORT.println(".local");
   }
-  server.on("/list", HTTP_GET, printDirectory);
-  server.onNotFound(handleNotFound);
+
+  server.on("/index.html", HTTP_GET, loadIndex);
+  server.on("/", HTTP_GET, loadIndex);
+  //server.onNotFound( [] () { loadFromSdCard(server.uri()); });
 
   server.begin();
   DBG_OUTPUT_PORT.println("HTTP server started");
